@@ -1,8 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { StorageService } from '../services/StorageService';
 import { NfcService } from '../services/NfcService';
 import { AuthService } from '../services/AuthService';
+import { 
+  auth, 
+  signInWithPopup, 
+  googleProvider, 
+  firebaseSignOut, 
+  onAuthStateChanged, 
+  type User 
+} from '../services/firebase';
+import { FirestoreSyncService } from '../services/FirestoreSyncService';
 import {
   Settings,
   Sun,
@@ -20,11 +29,14 @@ import {
   Info,
   Layers,
   Cpu,
-  User,
+  User as UserIcon,
   Lock,
   Unlock,
   KeyRound,
   Shield,
+  RefreshCw,
+  LogOut,
+  Sparkles,
 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
@@ -45,6 +57,78 @@ export const SettingsPage: React.FC = () => {
 
   const [importJsonText, setImportJsonText] = useState<string>('');
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+
+  // Firebase Auth & Cloud Sync State
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(() => auth.currentUser);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    try {
+      setIsLoggingIn(true);
+      const res = await signInWithPopup(auth, googleProvider);
+      showToast(`Berhasil masuk sebagai ${res.user.displayName || res.user.email}!`, 'success');
+    } catch (err: unknown) {
+      console.error('Login error:', err);
+      const msg = err instanceof Error ? err.message : 'Gagal login dengan Google';
+      showToast(msg, 'error');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    try {
+      await firebaseSignOut(auth);
+      showToast('Berhasil keluar dari akun Google.', 'info');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal keluar';
+      showToast(msg, 'error');
+    }
+  };
+
+  const handleSyncToCloud = async () => {
+    if (!firebaseUser) {
+      showToast('Silakan login dengan Google terlebih dahulu untuk sinkronisasi.', 'info');
+      return;
+    }
+    try {
+      setIsSyncing(true);
+      const res = await FirestoreSyncService.syncAllLocalProfilesToCloud();
+      showToast(`Sinkronisasi sukses! ${res.uploaded} profil tersimpan di Cloud Firestore.`, 'success');
+      triggerStatsRefresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal sinkronisasi data';
+      showToast(msg, 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handlePullFromCloud = async () => {
+    if (!firebaseUser) {
+      showToast('Silakan login dengan Google terlebih dahulu.', 'info');
+      return;
+    }
+    try {
+      setIsSyncing(true);
+      const count = await FirestoreSyncService.pullProfilesFromCloud();
+      showToast(`Berhasil mengunduh ${count} profil dari Cloud Firestore!`, 'success');
+      triggerStatsRefresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal mengunduh data cloud';
+      showToast(msg, 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Form ganti PIN
   const [isChangingPin, setIsChangingPin] = useState<boolean>(false);
@@ -425,24 +509,117 @@ export const SettingsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Storage Architecture & Firebase Overview */}
+      {/* Cloud Database (Firebase Firestore) */}
+      <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
+            <Cloud className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            <span>Cloud Database (Firebase Firestore)</span>
+          </h3>
+
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 self-start sm:self-auto">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Terhubung ke Firebase (Active)</span>
+          </span>
+        </div>
+
+        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          Database Cloud Firestore memungkinkan kartu nama digital Anda dapat diakses dan dilihat langsung oleh orang lain secara publik saat stiker NFC ditempelkan atau kode QR discan di ponsel manapun, tanpa perlu satu jaringan lokal.
+        </p>
+
+        {/* Firebase Authentication Bar */}
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              {firebaseUser?.photoURL ? (
+                <img
+                  src={firebaseUser.photoURL}
+                  alt={firebaseUser.displayName || 'Google User'}
+                  className="w-10 h-10 rounded-full border-2 border-indigo-500 object-cover"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-sm">
+                  <UserIcon className="w-5 h-5" />
+                </div>
+              )}
+
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                  {firebaseUser ? (firebaseUser.displayName || 'Pengguna Google') : 'Belum Masuk Akun Cloud'}
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  {firebaseUser ? firebaseUser.email : 'Masuk dengan Google untuk sinkronisasi cloud real-time'}
+                </p>
+              </div>
+            </div>
+
+            {firebaseUser ? (
+              <button
+                type="button"
+                onClick={handleGoogleLogout}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 transition-colors self-start sm:self-auto"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-500" />
+                <span>Keluar</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={isLoggingIn}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-500/20 transition-all self-start sm:self-auto disabled:opacity-50"
+              >
+                {isLoggingIn ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                <span>Masuk dengan Google</span>
+              </button>
+            )}
+          </div>
+
+          {/* Sync actions if logged in */}
+          {firebaseUser && (
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-700/60 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSyncToCloud}
+                disabled={isSyncing}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs disabled:opacity-50 transition-colors"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>{isSyncing ? 'Menyinkronkan...' : 'Unggah Profil ke Cloud'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePullFromCloud}
+                disabled={isSyncing}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-xs disabled:opacity-50 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Tarik Profil dari Cloud</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Storage Architecture & Local Backup */}
       <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
         <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
           <Database className="w-5 h-5 text-indigo-500" />
-          <span>Status Penyimpanan Data & Layanan</span>
+          <span>Cadangan Lokal & Pengaturan Memori</span>
         </h3>
 
         <div className="p-4 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 text-xs space-y-2">
           <div className="flex items-center justify-between">
             <span className="font-bold text-indigo-950 dark:text-indigo-200">
-              Penyimpanan Aktif:
+              Penyimpanan Cepat Perangkat:
             </span>
             <span className="px-2 py-0.5 rounded-md bg-indigo-200 dark:bg-indigo-900 text-indigo-900 dark:text-indigo-200 font-bold">
-              Lokal (StorageService v1)
+              Aktif (Offline First)
             </span>
           </div>
           <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-[11px]">
-            Data disimpan di peramban pengguna secara instan tanpa login. Kode telah dirancang dengan arsitektur lapisan layanan terpisah (<code>ProfileService</code>, <code>QrService</code>, <code>NfcService</code>, <code>HistoryService</code>, <code>StorageService</code>) sehingga siap dihubungkan ke Cloud Firestore jika sinkronisasi multi-perangkat diaktifkan.
+            Aplikasi tetap bekerja seketika walau tanpa sinyal internet menggunakan penyimpanan lokal.
           </p>
           <div className="flex items-center justify-between pt-1 text-[11px] text-slate-500">
             <span>Perkiraan Memori Lokal Digunakan:</span>
@@ -455,7 +632,7 @@ export const SettingsPage: React.FC = () => {
         {/* Data Backup & Restore */}
         <div className="space-y-3 pt-2">
           <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            Cadangan & Pemulihan (Backup & Restore)
+            Cadangan & Pemulihan Berkas (JSON)
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button

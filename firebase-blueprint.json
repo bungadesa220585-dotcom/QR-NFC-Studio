@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "DigitalProfile": {
+      "title": "DigitalProfile",
+      "description": "Public or private digital business card and profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "slug": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_-]+$" },
+        "fullName": { "type": "string", "maxLength": 128 },
+        "avatarUrl": { "type": "string", "maxLength": 1024 },
+        "title": { "type": "string", "maxLength": 128 },
+        "company": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 128 },
+        "website": { "type": "string", "maxLength": 512 },
+        "address": { "type": "string", "maxLength": 256 },
+        "bio": { "type": "string", "maxLength": 1000 },
+        "isPublic": { "type": "boolean" },
+        "socials": { "type": "object" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "slug", "fullName", "isPublic", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "QrRecord": {
+      "title": "QrRecord",
+      "description": "Generated and saved QR codes in user studio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["url", "text", "phone", "email", "wifi", "vcard", "profile"] },
+        "rawData": { "type": "string", "maxLength": 4096 },
+        "formattedDisplay": { "type": "string", "maxLength": 4096 },
+        "fgColor": { "type": "string", "maxLength": 32 },
+        "bgColor": { "type": "string", "maxLength": 32 },
+        "profileId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "type", "rawData", "fgColor", "bgColor", "ownerUid", "createdAt"]
+    },
+    "HistoryItem": {
+      "title": "HistoryItem",
+      "description": "Activity history log for QR and NFC scans and writes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "category": { "type": "string", "enum": ["qr", "profile", "nfc"] },
+        "title": { "type": "string", "maxLength": 128 },
+        "dataType": { "type": "string", "maxLength": 64 },
+        "value": { "type": "string", "maxLength": 4096 },
+        "status": { "type": "string", "maxLength": 64 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "category", "title", "dataType", "value", "ownerUid", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/profiles/{profileId}": {
+      "schema": "DigitalProfile",
+      "description": "Digital business cards published or managed by users"
+    },
+    "/users/{userId}/qr_records/{recordId}": {
+      "schema": "QrRecord",
+      "description": "QR code records owned by a user"
+    },
+    "/users/{userId}/history/{historyId}": {
+      "schema": "HistoryItem",
+      "description": "Activity log items for a user"
+    }
+  }
+}

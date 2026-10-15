@@ -1,0 +1,150 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Profile validation helper
+    function isValidProfile(data) {
+      return data.keys().hasAll(['id', 'slug', 'fullName', 'isPublic', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'slug', 'fullName', 'avatarUrl', 'title', 'company', 'phone', 'email', 'website', 'address', 'bio', 'isPublic', 'socials', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.slug is string && data.slug.size() > 0 && data.slug.size() <= 64 && data.slug.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.fullName is string && data.fullName.size() > 0 && data.fullName.size() <= 128
+        && data.isPublic is bool
+        && data.ownerUid is string && data.ownerUid == request.auth.uid
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 1024))
+        && (!('title' in data) || (data.title is string && data.title.size() <= 128))
+        && (!('company' in data) || (data.company is string && data.company.size() <= 128))
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 32))
+        && (!('email' in data) || (data.email is string && data.email.size() <= 128))
+        && (!('website' in data) || (data.website is string && data.website.size() <= 512))
+        && (!('address' in data) || (data.address is string && data.address.size() <= 256))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000))
+        && (!('socials' in data) || data.socials is map);
+    }
+
+    // QR record validation helper
+    function isValidQrRecord(data) {
+      return data.keys().hasAll(['id', 'title', 'type', 'rawData', 'formattedDisplay', 'fgColor', 'bgColor', 'ownerUid', 'createdAt'])
+        && data.keys().hasOnly(['id', 'title', 'type', 'rawData', 'formattedDisplay', 'fgColor', 'bgColor', 'profileId', 'ownerUid', 'createdAt'])
+        && data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 128
+        && data.type in ['url', 'text', 'phone', 'email', 'wifi', 'vcard', 'profile']
+        && data.rawData is string && data.rawData.size() > 0 && data.rawData.size() <= 4096
+        && data.formattedDisplay is string && data.formattedDisplay.size() <= 4096
+        && data.fgColor is string && data.fgColor.size() <= 32
+        && data.bgColor is string && data.bgColor.size() <= 32
+        && data.ownerUid is string && data.ownerUid == request.auth.uid
+        && data.createdAt is timestamp
+        && (!('profileId' in data) || (data.profileId is string && data.profileId.size() <= 128));
+    }
+
+    // History item validation helper
+    function isValidHistoryItem(data) {
+      return data.keys().hasAll(['id', 'category', 'title', 'dataType', 'value', 'ownerUid', 'createdAt'])
+        && data.keys().hasOnly(['id', 'category', 'title', 'dataType', 'value', 'status', 'ownerUid', 'createdAt'])
+        && data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.category in ['qr', 'profile', 'nfc']
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 128
+        && data.dataType is string && data.dataType.size() <= 64
+        && data.value is string && data.value.size() <= 4096
+        && data.ownerUid is string && data.ownerUid == request.auth.uid
+        && data.createdAt is timestamp
+        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
+    }
+
+    // Public Digital Profiles Collection
+    match /profiles/{profileId} {
+      allow get: if isValidId(profileId) && (
+        resource.data.isPublic == true || (isSignedIn() && resource.data.ownerUid == request.auth.uid)
+      );
+      
+      allow list: if (
+        resource.data.isPublic == true || (isSignedIn() && resource.data.ownerUid == request.auth.uid)
+      );
+
+      allow create: if isValidId(profileId)
+        && isSignedIn()
+        && isValidProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(profileId)
+        && isSignedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && isValidProfile(incoming())
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'fullName', 'slug', 'avatarUrl', 'title', 'company',
+          'phone', 'email', 'website', 'address', 'bio',
+          'isPublic', 'socials', 'updatedAt'
+        ]);
+
+      allow delete: if isValidId(profileId)
+        && isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // User Subcollections (QR Records & History)
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /qr_records/{recordId} {
+        allow get: if isOwner(userId) && isValidId(recordId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && isValidId(recordId)
+          && isValidQrRecord(incoming())
+          && incoming().createdAt == request.time;
+        allow update: if isOwner(userId)
+          && isValidId(recordId)
+          && isValidQrRecord(incoming())
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'type', 'rawData', 'formattedDisplay', 'fgColor', 'bgColor', 'profileId'
+          ]);
+        allow delete: if isOwner(userId) && isValidId(recordId);
+      }
+
+      match /history/{historyId} {
+        allow get: if isOwner(userId) && isValidId(historyId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && isValidId(historyId)
+          && isValidHistoryItem(incoming())
+          && incoming().createdAt == request.time;
+        allow delete: if isOwner(userId) && isValidId(historyId);
+      }
+    }
+  }
+}

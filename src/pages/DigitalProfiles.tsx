@@ -3,6 +3,8 @@ import { useApp } from '../context/AppContext';
 import { DigitalProfile, SocialLinks } from '../types';
 import { ProfileService } from '../services/ProfileService';
 import { HistoryService } from '../services/HistoryService';
+import { auth } from '../services/firebase';
+import { FirestoreSyncService } from '../services/FirestoreSyncService';
 import {
   UserSquare2,
   Plus,
@@ -193,7 +195,17 @@ export const DigitalProfiles: React.FC = () => {
 
     setIsModalOpen(false);
     reloadProfiles();
-    showToast(`Profil ${saved.fullName} berhasil disimpan!`, 'success');
+
+    if (auth.currentUser) {
+      FirestoreSyncService.uploadProfile(saved)
+        .then(() => showToast(`Profil ${saved.fullName} tersimpan & tersinkron ke Cloud!`, 'success'))
+        .catch(err => {
+          console.warn('Gagal sinkron cloud:', err);
+          showToast(`Profil tersimpan di lokal (Cloud pending)`, 'info');
+        });
+    } else {
+      showToast(`Profil ${saved.fullName} berhasil disimpan!`, 'success');
+    }
   };
 
   // Delete profile with confirmation
@@ -205,6 +217,9 @@ export const DigitalProfiles: React.FC = () => {
       isDestructive: true,
       onConfirm: () => {
         ProfileService.delete(profile.id);
+        if (auth.currentUser) {
+          FirestoreSyncService.deleteProfile(profile.id).catch(e => console.warn('Cloud delete failed:', e));
+        }
         reloadProfiles();
         showToast('Profil berhasil dihapus.', 'info');
       },

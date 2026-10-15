@@ -1,6 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { ProfileService } from '../services/ProfileService';
+import { FirestoreSyncService } from '../services/FirestoreSyncService';
+import { DigitalProfile } from '../types';
 import {
   UserSquare2,
   Phone,
@@ -20,14 +22,42 @@ import {
   ExternalLink,
   ShieldAlert,
   Sparkles,
+  Loader2,
 } from 'lucide-react';
 
 export const PublicProfilePage: React.FC = () => {
   const { activeProfileSlug, setCurrentPage, showToast } = useApp();
-
-  const profile = useMemo(() => {
+  const [profile, setProfile] = useState<DigitalProfile | undefined>(() => {
     if (!activeProfileSlug) return undefined;
     return ProfileService.getBySlug(activeProfileSlug);
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(!profile && Boolean(activeProfileSlug));
+
+  useEffect(() => {
+    if (!activeProfileSlug) return;
+    const local = ProfileService.getBySlug(activeProfileSlug);
+    if (local) {
+      setProfile(local);
+    }
+
+    let isMounted = true;
+    FirestoreSyncService.getPublicProfileBySlug(activeProfileSlug)
+      .then(cloudProfile => {
+        if (!isMounted) return;
+        if (cloudProfile) {
+          setProfile(cloudProfile);
+        }
+      })
+      .catch(err => {
+        console.warn('Gagal memuat profil dari cloud:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [activeProfileSlug]);
 
   const handleShare = async () => {
@@ -54,6 +84,16 @@ export const PublicProfilePage: React.FC = () => {
     ProfileService.downloadVCard(profile);
     showToast('Kontak vCard (.vcf) berhasil diunduh!', 'success');
   };
+
+  if (isLoading) {
+    return (
+      <div className="max-w-md mx-auto my-16 p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center shadow-xl">
+        <Loader2 className="w-10 h-10 animate-spin text-indigo-600 dark:text-indigo-400 mx-auto mb-4" />
+        <h3 className="text-lg font-bold text-slate-800 dark:text-white">Memuat Profil Digital...</h3>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Menghubungkan ke Cloud Firestore</p>
+      </div>
+    );
+  }
 
   // State if profile not found
   if (!profile) {
